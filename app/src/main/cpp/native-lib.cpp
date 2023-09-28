@@ -14,6 +14,8 @@ void bitmap2Mat(JNIEnv *env, Mat &mat, jobject bitmap);
 // mat 转成 bitmap
 void mat2Bitmap(JNIEnv *env, Mat mat, jobject bitmap);
 
+void mosaicFace(Mat mat);
+
 // bitmap 转成 Mat
 void bitmap2Mat(JNIEnv *env, Mat &mat, jobject bitmap) {
     // Mat 里面有个 type：
@@ -84,6 +86,32 @@ void mat2Bitmap(JNIEnv *env, Mat mat, jobject bitmap) {
     AndroidBitmap_unlockPixels(env, bitmap);
 }
 CascadeClassifier cascadeClassifier;
+
+void mosaicFace(Mat src) {
+
+    // 获取图片的宽高
+    int src_w = src.cols;
+    int src_h = src.rows;
+    // 省略 人脸识别
+    int rows_s = src_h >> 2;
+    int rows_e = src_h * 3 / 4;
+    int cols_s = src_w >> 2;
+    int cols_e = src_w * 3 / 4;
+    // 马赛克大小
+    int size = 30;
+    for (int row = rows_s; row < rows_e; row += size) {
+        for (int col = cols_s; col < cols_e; col += size) {
+            int pixels = src.at<int>(row, col);
+            // 10 * 10 的范围内都有第一个 像素值
+            for (int m_rows = 1; m_rows < size; ++m_rows) {
+                for (int m_cols = 0; m_cols < size; ++m_cols) {
+                    src.at<int>(row + m_rows, col + cols_s) = pixels;
+                }
+            }
+        }
+    }
+}
+
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_swan_opencv_1demo_FaceDetection_loadCascade(JNIEnv *env, jobject thiz, jstring file_path_) {
@@ -132,4 +160,35 @@ Java_com_swan_opencv_1demo_FaceDetection_faceDetectionFaceInfo(JNIEnv *env, jobj
     // 保存人脸信息
 
     return 0;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_swan_opencv_1demo_FaceDetection_faceDetection(JNIEnv *env, jobject thiz,
+                                                       jlong nativeObj) {
+    Mat *src = reinterpret_cast<Mat *>(nativeObj);
+
+    int width = src->rows;
+    int height = src->cols;
+
+    Mat grayMat;
+    // 2. 转成灰度图，提升运算速度，灰度图所对应的 CV_8UC1 单颜色通道，信息量少 0-255 1u
+    cvtColor(*src, grayMat, COLOR_BGR2GRAY);
+
+    // 4. 检测人脸，这是个大问题
+    std::vector<Rect> faces;
+    cascadeClassifier.detectMultiScale(grayMat, faces, 1.1, 3, 0, Size(width / 2, height / 2));
+    LOGE("人脸size = %d", faces.size());
+
+    if(faces.size() != 1){
+        // 打个马赛克
+        mosaicFace(*src);
+        return;
+    }
+
+    // 把脸框出来
+    Rect faceRect = faces[0];
+    rectangle(*src, faceRect, Scalar(255, 0, 0, 255), 4, LINE_AA);
+
+    mosaicFace((*src)(faceRect));
 }
